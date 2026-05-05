@@ -148,7 +148,9 @@ jobs:
     env:
       RUN_REAL_AGENT_TESTS: "1"
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
       KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
