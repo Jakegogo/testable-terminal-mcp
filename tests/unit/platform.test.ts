@@ -42,8 +42,14 @@ describe("defaultShell", () => {
     expect(defaultShell(undefined, "/bin/fish", inferPlatform("linux", "x64"))).toBe("/bin/fish");
   });
 
-  it("falls back to /bin/zsh on POSIX without env SHELL", () => {
-    expect(defaultShell(undefined, undefined, inferPlatform("darwin", "arm64"))).toBe("/bin/zsh");
+  it("falls back to /bin/zsh on POSIX when env SHELL is empty", () => {
+    // Use empty string explicitly: passing `undefined` as the 2nd arg
+    // triggers TS default-parameter binding which reads
+    // `process.env.SHELL`. That's by-design (caller "I don't know" → read
+    // env), but makes any test of "fallback when not set" CI-env-dependent
+    // (Ubuntu runners have SHELL=/bin/bash, not /bin/zsh). Empty string is
+    // the unambiguous "no SHELL configured" signal — works on every host.
+    expect(defaultShell(undefined, "", inferPlatform("darwin", "arm64"))).toBe("/bin/zsh");
     expect(defaultShell(undefined, "", inferPlatform("linux", "x64"))).toBe("/bin/zsh");
   });
 
