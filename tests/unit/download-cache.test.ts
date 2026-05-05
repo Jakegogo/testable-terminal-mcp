@@ -134,7 +134,12 @@ describe("DownloadCache — LRU eviction", () => {
 describe("defaultCacheDir / pickArchiveExt", () => {
   it("POSIX default points under XDG_CACHE_HOME or ~/.cache", () => {
     const dir = defaultCacheDir(inferPlatform("darwin", "arm64"));
-    expect(dir.endsWith("/ttm/downloads")).toBe(true);
+    // Normalize separators: when this test runs on a Windows host (CI),
+    // node:path.join uses `\` regardless of the inferred POSIX platform.
+    // The behavior is correct (Node fs accepts both); just assert in
+    // a platform-agnostic way.
+    const norm = dir.replace(/\\/g, "/");
+    expect(norm.endsWith("/ttm/downloads")).toBe(true);
   });
 
   it("Windows default points under LOCALAPPDATA/ttm/Cache/downloads", () => {

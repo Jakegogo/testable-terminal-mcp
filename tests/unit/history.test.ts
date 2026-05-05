@@ -67,6 +67,20 @@ describe("SessionHistory — ring buffer FIFO truncation", () => {
     h.append("zzz");
     expect(h.getHistoryStats().chunks).toBe(3);
   });
+
+  it("single chunk LARGER than maxBytes keeps the trailing maxBytes (regression)", () => {
+    // Repro: Ubuntu node 20 + bash batched a `for i in $(seq 1 80); do echo` loop
+    // into ONE PTY chunk > maxBytes. Old ring eviction shifted the whole chunk
+    // out, leaving history EMPTY. Fixed by retaining the tail of the oversized
+    // chunk so getRawHistory() always returns the most recent output.
+    const h = new SessionHistory({ maxHistoryBytes: 10, historyLogPath: null });
+    h.append("PREFIX_THAT_GETS_DROPPED_xyzabcXX_TAIL_KEEP");
+    const stats = h.getHistoryStats();
+    expect(stats.truncated).toBe(true);
+    expect(stats.bytes).toBeLessThanOrEqual(10);
+    // The tail (last 10 bytes) is retained — caller still sees recent output.
+    expect(h.getRawHistory()).toBe("_TAIL_KEEP");
+  });
 });
 
 describe("SessionHistory — disk mirror", () => {

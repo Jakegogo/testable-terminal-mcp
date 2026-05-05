@@ -60,6 +60,18 @@ export class SessionHistory {
       this.bytes -= dropped.length;
       this.truncated = true;
     }
+    // Edge case: a single chunk arrived larger than maxBytes — the shift
+    // loop above just dropped it entirely, leaving history empty.
+    // Observed on Ubuntu node 20 + bash where a tight loop's stdout was
+    // batched into one >512B chunk by the PTY layer. Keep the trailing
+    // maxBytes bytes so callers always see the MOST RECENT output, which
+    // is what they actually care about.
+    if (this.chunks.length === 0 && buf.length > this.maxBytes) {
+      const tail = buf.subarray(buf.length - this.maxBytes);
+      this.chunks.push(tail);
+      this.bytes = tail.length;
+      this.truncated = true;
+    }
   }
 
   /**

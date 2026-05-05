@@ -81,7 +81,11 @@ describe("snapshot store — round-trip", () => {
 describe("snapshot store — paths", () => {
   it("snapshotPath sanitizes test file id and case name", () => {
     const p = snapshotPath("/snap", "tests/foo bar.test.ts", "case with: weird/chars");
-    expect(p).toMatch(/^\/snap\/tests_foo_bar\.test\.ts\/case_with__weird_chars\.snap$/);
+    // Normalize separators: on Windows path.join uses `\`. The behavior
+    // is correct (Node fs canonical), but the assertion needs to be
+    // platform-agnostic.
+    const norm = p.replace(/\\/g, "/");
+    expect(norm).toMatch(/^\/snap\/tests_foo_bar\.test\.ts\/case_with__weird_chars\.snap$/);
   });
 
   it("pendingPath appends .new", () => {
