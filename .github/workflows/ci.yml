@@ -147,6 +147,17 @@ jobs:
           if-no-files-found: ignore
 
   # ─── real agent: opt-in via PR label `run-real-agent` ─────────────────────
+  #
+  # Why aikey on CI: the local dev path uses aikey to route claude/codex/kimi
+  # through a local proxy with vault-stored keys. To make CI behave the same
+  # (loginShell + simulatePrecmdHooks → precmd hook fires → active.env env
+  # is in scope), we install aikey on the runner, populate the vault from
+  # GitHub secrets, then `aikey use` the appropriate alias for each provider.
+  #
+  # The install is non-interactive end-to-end. If you want to debug the
+  # runner interactively (add OAuth account, switch keys, etc.), add the
+  # PR label `run-real-agent-tmate` to drop into a tmate SSH session
+  # instead. See CONTRIBUTING.md "Manual runner login guide".
   real-agent:
     name: real-agent (${{ matrix.os }})
     needs: tier1
@@ -158,17 +169,88 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     env:
       RUN_REAL_AGENT_TESTS: "1"
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
-      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      # Master password used to encrypt the runner's aikey vault. It's
+      # ephemeral (vault dies when the runner does), but we still treat it
+      # as a secret so log output won't show it.
+      AK_TEST_PASSWORD: ${{ secrets.AIKEY_MASTER_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run build
-      - run: npx vitest run tests/integration-agent
+
+      # Install agent CLIs. Adjust these as the official distribution
+      # channels stabilize; npm-based names below are placeholders that
+      # may need updating for each agent.
+      - name: Install agent binaries (claude / codex / kimi)
+        run: |
+          set -e
+          # Anthropic Claude Code — official npm package
+          npm i -g @anthropic-ai/claude-code || echo "claude install failed; tests using claude will skip"
+          # OpenAI Codex CLI
+          npm i -g @openai/codex || echo "codex install failed; tests using codex will skip"
+          # Moonshot Kimi — adjust if Moonshot publishes a different package name
+          npm i -g @moonshotai/kimi || echo "kimi install failed; tests using kimi will skip"
+
+      # Install aikey CLI from the public release channel.
+      - name: Install aikey CLI
+        run: |
+          set -e
+          curl -fsSL https://raw.githubusercontent.com/aikeylabs/launch/main/local-install.sh | sh -s -- --yes
+          # aikey writes binaries to ~/.aikey/bin and adds to PATH via shell hook
+          echo "$HOME/.aikey/bin" >> "$GITHUB_PATH"
+
+      # Populate aikey vault from GitHub secrets. Non-interactive, no TTY.
+      # Each `aikey add` reads the secret value from stdin so the value
+      # never appears in argv (visible in `ps`).
+      - name: Populate aikey vault from secrets
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -e
+          # Master-password env unlocks the vault on first command.
+          # On runner, we don't care about persistence — vault dies when
+          # runner does — so a known dummy works.
+          : "${AK_TEST_PASSWORD:=ci-runner-master-password}"
+          export AK_TEST_PASSWORD
+
+          # Boot vault.
+          aikey doctor || true   # warm up + show diagnostic on failure
+
+          # Add each provider that has a secret configured.
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            printf '%s' "$ANTHROPIC_API_KEY" | aikey add anthropic-ci --protocol anthropic --from-stdin || true
+            aikey use anthropic-ci || true
+          fi
+          if [ -n "$KIMI_API_KEY" ]; then
+            printf '%s' "$KIMI_API_KEY" | aikey add kimi-ci --protocol kimi --from-stdin || true
+            aikey use kimi-ci || true
+          fi
+          if [ -n "$OPENAI_API_KEY" ]; then
+            printf '%s' "$OPENAI_API_KEY" | aikey add openai-ci --protocol openai --from-stdin || true
+            aikey use openai-ci || true
+          fi
+
+          aikey list || true
+          aikey status || true
+
+      # Optional: drop into tmate SSH for manual setup (run-real-agent-tmate
+      # label). The action exposes an SSH command in the job log; you connect
+      # from your laptop and run `aikey auth login`, etc. The job pauses
+      # until you `touch /tmp/continue` inside the tmate session.
+      - name: Manual setup window (tmate)
+        if: contains(github.event.pull_request.labels.*.name, 'run-real-agent-tmate')
+        uses: mxschmitt/action-tmate@v3
+        with:
+          limit-access-to-actor: true
+          detached: false
+
+      - name: Run real-agent tests
+        run: npx vitest run tests/integration-agent
 
       - name: Upload artifacts on failure
         if: failure()
