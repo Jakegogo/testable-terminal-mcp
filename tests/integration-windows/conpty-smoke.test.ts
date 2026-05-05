@@ -20,7 +20,12 @@ const TIMEOUT = 15_000;
 describeIfWindows("Windows ConPTY smoke", () => {
   it("pwsh launches + Write-Host echoes + we see the output", async () => {
     const session = await startSession({
-      command: "pwsh",
+      // Use pwsh.exe explicitly: GH windows-latest runners have pwsh
+      // installed at C:\Program Files\PowerShell\7\pwsh.exe and on PATH,
+      // but node-pty's spawn-by-short-name "pwsh" sometimes returns
+      // "File not found" on the runner (depends on runner image vintage).
+      // Using .exe ensures CreateProcessW finds it via PATHEXT lookup.
+      command: "pwsh.exe",
       args: ["-NoLogo"],
       rows: 24,
       cols: 100,

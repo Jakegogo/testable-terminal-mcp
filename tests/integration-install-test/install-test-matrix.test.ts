@@ -37,6 +37,17 @@ afterAll(() => { resetCleanup(); resetMgr(); });
 
 const TIMEOUT = 20_000;
 const FIXTURE_DIR = path.join(__dirname, "..", "fixtures", "stub-installer");
+// Pin zsh for these tests — the fixtures write to ~/.zshrc so a fresh-login
+// snapshot must use zsh to see the changes. CI runners (Ubuntu / macOS GH)
+// default $SHELL=/bin/bash; without this pin, fresh-login spawns bash which
+// doesn't read .zshrc, the env doesn't change, and the assertion that
+// expects PATH duplicates / new vars wrongly says "no diff".
+const ZSH_PATH: string | undefined = (() => {
+  for (const candidate of ["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh"]) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return undefined; // no zsh on this host → these tests early-return below
+})();
 
 // Run an installer script with HOME pointed at the sandbox. spawnSync,
 // not PTY — installer scripts don't need a terminal.
@@ -68,12 +79,12 @@ afterEach(() => { resetMgr(); });
 
 describe("install-test matrix — good-install.sh (baseline)", () => {
   it("env_snapshot before/after; env_diff with PATH-prepend allowed; no PATH dups", async () => {
-    if (hostPlatform.isWindows) return;
+    if (hostPlatform.isWindows || !ZSH_PATH) return;
     const sbx = createSandbox({ config: { mode: "ephemeral" }, manager: { maxConcurrentSandboxes: 4, skipSignalHooks: true } });
 
-    const before = captureEnvSnapshot({ name: "before", mode: "fresh-login", sandbox: sbx });
+    const before = captureEnvSnapshot({ name: "before", mode: "fresh-login", sandbox: sbx, shellPath: ZSH_PATH });
     runInstaller({ sandboxPath: sbx.path, script: "good-install.sh" });
-    const after = captureEnvSnapshot({ name: "after", mode: "fresh-login", sandbox: sbx });
+    const after = captureEnvSnapshot({ name: "after", mode: "fresh-login", sandbox: sbx, shellPath: ZSH_PATH });
 
     // PATH may pick up the prepended dir; new GOOD_INSTALLED_PATH var added.
     expect(() => assertEnvDiff({
@@ -87,14 +98,14 @@ describe("install-test matrix — good-install.sh (baseline)", () => {
   }, TIMEOUT);
 
   it("idempotent_install on good-install.sh succeeds (guarded re-run)", async () => {
-    if (hostPlatform.isWindows) return;
+    if (hostPlatform.isWindows || !ZSH_PATH) return;
     const sbx = createSandbox({ config: { mode: "ephemeral" }, manager: { maxConcurrentSandboxes: 4, skipSignalHooks: true } });
 
     await assertIdempotentInstall({
       sandbox: sbx,
       runCommand: async () => runInstaller({ sandboxPath: sbx.path, script: "good-install.sh" }),
       filesToCompare: [".zshrc"],
-      captureEnv: async (name) => captureEnvSnapshot({ name, mode: "fresh-login", sandbox: sbx }),
+      captureEnv: async (name) => captureEnvSnapshot({ name, mode: "fresh-login", sandbox: sbx, shellPath: ZSH_PATH }),
     });
     // No throw → passed.
   }, TIMEOUT);
@@ -104,13 +115,13 @@ describe("install-test matrix — good-install.sh (baseline)", () => {
 
 describe("install-test matrix — duplicate-path.sh", () => {
   it("running twice produces PATH duplicates → assert flags it", async () => {
-    if (hostPlatform.isWindows) return;
+    if (hostPlatform.isWindows || !ZSH_PATH) return;
     const sbx = createSandbox({ config: { mode: "ephemeral" }, manager: { maxConcurrentSandboxes: 4, skipSignalHooks: true } });
 
     runInstaller({ sandboxPath: sbx.path, script: "duplicate-path.sh" });
     runInstaller({ sandboxPath: sbx.path, script: "duplicate-path.sh" });
 
-    const after = captureEnvSnapshot({ name: "after", mode: "fresh-login", sandbox: sbx });
+    const after = captureEnvSnapshot({ name: "after", mode: "fresh-login", sandbox: sbx, shellPath: ZSH_PATH });
     try {
       assertEnvNoPathDuplicates({ snapshot: after });
       expect.fail("should have flagged PATH duplicates");
@@ -167,7 +178,7 @@ describe("install-test matrix — leaks-to-host.sh", () => {
 
 describe("install-test matrix — non-idempotent.sh", () => {
   it("two rounds yield different .zshrc content → assertIdempotentInstall throws", async () => {
-    if (hostPlatform.isWindows) return;
+    if (hostPlatform.isWindows || !ZSH_PATH) return;
     const sbx = createSandbox({ config: { mode: "ephemeral" }, manager: { maxConcurrentSandboxes: 4, skipSignalHooks: true } });
 
     try {
@@ -179,7 +190,7 @@ describe("install-test matrix — non-idempotent.sh", () => {
           await new Promise((r) => setTimeout(r, 5));
         },
         filesToCompare: [".zshrc"],
-        captureEnv: async (name) => captureEnvSnapshot({ name, mode: "fresh-login", sandbox: sbx }),
+        captureEnv: async (name) => captureEnvSnapshot({ name, mode: "fresh-login", sandbox: sbx, shellPath: ZSH_PATH }),
       });
       expect.fail("should have flagged non-idempotence");
     } catch (err) {
@@ -287,25 +298,34 @@ describe("install-test matrix — writes-bash-profile.sh (round 8)", () => {
 
 describe("Session install-test API", () => {
   it("session.envSnapshot + assertEnvDiff + assertEnvNoPathDuplicates wired up", async () => {
-    if (hostPlatform.isWindows) return;
-    const sbx = createSandbox({ config: { mode: "ephemeral" }, manager: { maxConcurrentSandboxes: 4, skipSignalHooks: true } });
-    const session = await startSession({ command: "bash", sandbox: sbx });
+    if (hostPlatform.isWindows || !ZSH_PATH) return;
+    // Pin SHELL so session.envSnapshot's fresh-login default uses zsh —
+    // good-install.sh writes to .zshrc and a bash login shell wouldn't see it.
+    const prevShell = process.env.SHELL;
+    process.env.SHELL = ZSH_PATH;
     try {
-      await session.waitForRegex(/\$\s/, { timeoutMs: 3_000 });
-      session.envSnapshot("before");
-      runInstaller({ sandboxPath: sbx.path, script: "good-install.sh" });
-      session.envSnapshot("after");
+      const sbx = createSandbox({ config: { mode: "ephemeral" }, manager: { maxConcurrentSandboxes: 4, skipSignalHooks: true } });
+      const session = await startSession({ command: "bash", sandbox: sbx });
+      try {
+        await session.waitForRegex(/\$\s/, { timeoutMs: 3_000 });
+        session.envSnapshot("before");
+        runInstaller({ sandboxPath: sbx.path, script: "good-install.sh" });
+        session.envSnapshot("after");
 
-      // baseline env_diff — explicitly allow GOOD_INSTALLED_PATH add + PATH modify.
-      session.assertEnvDiff("before", "after", {
-        allowedChanges: [
-          { key: "GOOD_INSTALLED_PATH", op: "add" },
-          { key: "PATH", op: "modify" },
-        ],
-      });
-      session.assertEnvNoPathDuplicates("after");
+        // baseline env_diff — explicitly allow GOOD_INSTALLED_PATH add + PATH modify.
+        session.assertEnvDiff("before", "after", {
+          allowedChanges: [
+            { key: "GOOD_INSTALLED_PATH", op: "add" },
+            { key: "PATH", op: "modify" },
+          ],
+        });
+        session.assertEnvNoPathDuplicates("after");
+      } finally {
+        await session.close();
+      }
     } finally {
-      await session.close();
+      if (prevShell !== undefined) process.env.SHELL = prevShell;
+      else delete process.env.SHELL;
     }
   }, TIMEOUT);
 

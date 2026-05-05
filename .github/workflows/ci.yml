@@ -94,16 +94,24 @@ jobs:
           key: ttm-cache-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
       - run: npm ci
       - run: npm run build
-      - run: npm run test:integration-sandbox
-      - name: Snapshot integration
-        run: npx vitest run tests/integration-snapshot
-      - name: Install-test integration
+      # Sandbox + install-test + yaml + mcp dispatch all spawn bash sessions
+      # internally, which doesn't work on Windows runners (no native bash on
+      # default PATH). These run on POSIX only; Windows-specific PTY coverage
+      # lives in `windows-only` (pwsh) below.
+      - name: Sandbox integration (POSIX only)
+        if: runner.os != 'Windows'
+        run: npm run test:integration-sandbox
+      - name: Install-test integration (POSIX only)
+        if: runner.os != 'Windows'
         run: npx vitest run tests/integration-install-test
-      - name: YAML + MCP integration
+      - name: YAML + MCP integration (POSIX only)
+        if: runner.os != 'Windows'
         run: |
           npx vitest run tests/integration-yaml
           npx vitest run tests/integration-mcp
-      - name: Mock LLM server contract
+      - name: Snapshot integration (cross-platform)
+        run: npx vitest run tests/integration-snapshot
+      - name: Mock LLM server contract (cross-platform)
         run: npx vitest run tests/integration-mock-llm
 
       - name: Upload artifacts on failure
