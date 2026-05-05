@@ -43,7 +43,7 @@ describeIfWindows("Windows ConPTY smoke", () => {
   }, TIMEOUT);
 
   it("ctrl_c interrupts a long-running pwsh sleep", async () => {
-    const session = await startSession({ command: "pwsh", args: ["-NoLogo"] });
+    const session = await startSession({ command: "pwsh.exe", args: ["-NoLogo"] });
     try {
       await session.waitForRegex(/PS\s.*>\s/, { timeoutMs: 5_000 });
       session.write("Start-Sleep -Seconds 30\r");
