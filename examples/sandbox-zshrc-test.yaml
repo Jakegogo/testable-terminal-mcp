@@ -1,0 +1,22 @@
+name: sandbox-zshrc-test
+session:
+  command: bash
+  rows: 24
+  cols: 80
+  sandbox: ephemeral
+  sandbox_profile: minimal
+steps:
+  - expect_regex:
+      pattern: '\$\s'
+      timeout_ms: 3000
+  - write: "echo HOME_IS=$HOME\n"
+  - expect_regex:
+      pattern: 'HOME_IS=/.*ttm-sbx-'
+      timeout_ms: 3000
+  - write: "test -d $HOME/bin && echo BIN_EXISTS\n"
+  - expect_text:
+      text: BIN_EXISTS
+      timeout_ms: 3000
+  - write: "exit 0\n"
+  - wait_exit:
+      max_wait_ms: 3000

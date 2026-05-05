@@ -1,0 +1,53 @@
+{
+  "name": "testable-terminal-mcp",
+  "version": "0.0.1",
+  "description": "Cross-platform CLI/TUI testing infrastructure: PTY + headless terminal + sandbox + MCP/YAML adapters.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "testable-terminal-mcp": "./dist/bin/mcp-server.js",
+    "ttm-run": "./dist/bin/yaml-runner.js",
+    "ttm-sandbox": "./dist/bin/sandbox.js",
+    "ttm-review": "./dist/bin/review.js",
+    "ttm-tier3": "./dist/bin/tier3.js"
+  },
+  "scripts": {
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run tests/unit",
+    "test:integration-bash": "vitest run tests/integration-bash",
+    "test:integration-sandbox": "vitest run tests/integration-sandbox",
+    "lint:check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@xterm/headless": "^5.5.0",
+    "node-pty": "^1.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@vitest/coverage-v8": "^1.6.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

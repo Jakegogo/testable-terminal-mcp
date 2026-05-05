@@ -1,0 +1,190 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Windows nightly mock-agent at 03:00 UTC.
+    - cron: "0 3 * * *"
+
+# Cancel in-progress runs for the same ref when a new push lands. Keeps PR
+# feedback fast without spending CI minutes on stale revisions.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── tier 1: unit + bash integration on the full OS×Node matrix ───────────
+  tier1:
+    name: tier1 (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # Cross-platform download cache. Path differs by OS; use bash on
+      # Windows (the runner has Git Bash) for a single restore step.
+      - name: Restore download cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ttm/downloads
+            ~/AppData/Local/ttm/Cache/downloads
+          key: ttm-cache-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Bash integration tests
+        # bash exists on macOS/Linux runners; on windows-latest we use
+        # Git for Windows' bash (which ships pre-installed). The PTY layer
+        # is exercised differently here — on Windows it goes through ConPTY.
+        run: npm run test:integration-bash
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier1-${{ matrix.os }}-node${{ matrix.node }}-artifacts
+          path: |
+            artifacts/
+            **/snapshots/__rejected__/
+          if-no-files-found: ignore
+
+  # ─── tier 2: sandbox + snapshot integration ────────────────────────────────
+  tier2:
+    name: tier2 (${{ matrix.os }})
+    needs: tier1
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        node: [22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Restore download cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ttm/downloads
+            ~/AppData/Local/ttm/Cache/downloads
+          key: ttm-cache-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:integration-sandbox
+      - name: Snapshot integration
+        run: npx vitest run tests/integration-snapshot
+      - name: Install-test integration
+        run: npx vitest run tests/integration-install-test
+      - name: YAML + MCP integration
+        run: |
+          npx vitest run tests/integration-yaml
+          npx vitest run tests/integration-mcp
+      - name: Mock LLM server contract
+        run: npx vitest run tests/integration-mock-llm
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tier2-${{ matrix.os }}-artifacts
+          path: |
+            artifacts/
+            tests/__snapshots__/**/*.snap.new
+          if-no-files-found: ignore
+
+  # ─── windows-only: ConPTY-specific integration ────────────────────────────
+  windows-only:
+    name: windows-only
+    needs: tier1
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      # Windows-specific tests live behind a guard — skipped on POSIX.
+      - run: npx vitest run tests/integration-windows
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-only-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
+
+  # ─── real agent: opt-in via PR label `run-real-agent` ─────────────────────
+  real-agent:
+    name: real-agent (${{ matrix.os }})
+    needs: tier1
+    if: contains(github.event.pull_request.labels.*.name, 'run-real-agent')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    env:
+      RUN_REAL_AGENT_TESTS: "1"
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - run: npx vitest run tests/integration-agent
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-agent-${{ matrix.os }}-artifacts
+          path: artifacts/
+          if-no-files-found: ignore
+
+  # ─── windows mock-agent: nightly cron only ─────────────────────────────────
+  windows-mock-agent:
+    name: windows-mock-agent
+    needs: tier1
+    if: github.event_name == 'schedule'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      # The mock LLM server runs in-process during the test (vitest spawns
+      # it via startMockServer). No external service to manage.
+      - run: npx vitest run tests/integration-windows-mock-agent
+
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-mock-agent-artifacts
+          path: artifacts/
+          if-no-files-found: ignore

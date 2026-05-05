@@ -1,0 +1,26 @@
+name: claude-real-agent
+# Real-agent YAML case — exercises the YAML runner end-to-end against the
+# live Anthropic API via aikey routing.
+#
+# Run:
+#   RUN_REAL_AGENT_TESTS=1 npx tsx src/bin/yaml-runner.ts examples/claude-real-agent.yaml
+#
+# login_shell: true is critical so the aikey shell wrapper fires (which
+# routes the API call through the local aikey proxy with the vault key).
+session:
+  command: claude
+  args: ["--print", "5 + 10 = ? Reply with just the number, nothing else."]
+  rows: 24
+  cols: 100
+  login_shell: true
+  # Hook-based tools (aikey, nvm, direnv, ...) inject env via zsh's
+  # `precmd_functions` / bash's `PROMPT_COMMAND` — but those only fire
+  # before each interactive prompt. Under `-ilc 'cmd'` the prompt cycle
+  # never happens, so the hooks never fire and env vars stay missing.
+  # `simulate_precmd_hooks: true` manually iterates the hook chain once
+  # before exec — zero-config alternative to listing pre_source_files.
+  simulate_precmd_hooks: true
+steps:
+  - expect_regex:
+      pattern: '\b15\b'
+      timeout_ms: 60000

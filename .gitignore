@@ -1,0 +1,32 @@
+# node
+node_modules/
+*.log
+.DS_Store
+
+# build / coverage
+dist/
+build/
+coverage/
+.tsbuildinfo
+
+# spike-local
+spike/node_modules/
+spike/dist/
+
+# transient artifacts
+artifacts/
+*.snap.new
+*.snap.actual
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# env (caller-provided secrets must never be committed)
+.env
+.env.*
+!.env.example
+
+# os
+Thumbs.db

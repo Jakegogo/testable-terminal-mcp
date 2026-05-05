@@ -1,0 +1,16 @@
+name: bash-smoke
+session:
+  command: bash
+  rows: 24
+  cols: 80
+steps:
+  - expect_regex:
+      pattern: '\$\s'
+      timeout_ms: 3000
+  - write: "echo HELLO_FROM_YAML\n"
+  - expect_text:
+      text: HELLO_FROM_YAML
+      timeout_ms: 3000
+  - write: "exit 0\n"
+  - wait_exit:
+      max_wait_ms: 3000

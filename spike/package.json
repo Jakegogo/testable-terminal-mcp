@@ -1,0 +1,37 @@
+{
+  "name": "testable-terminal-mcp-spike",
+  "version": "0.0.1-spike",
+  "private": true,
+  "type": "module",
+  "description": "One-shot spike validating node-pty + @xterm/headless can drive real TUI agents (claude, kimi).",
+  "scripts": {
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true",
+    "spike": "tsx src/spike.ts",
+    "spike:bash": "tsx src/spike.ts bash --prompt 'echo $((6 + 7))' --expect 13 --timeout 5000",
+    "spike:bash:interactive": "tsx src/spike.ts bash --login-shell --interactive",
+    "spike:zsh:interactive": "tsx src/spike.ts zsh --login-shell --interactive",
+    "spike:env": "tsx src/diagnose-env.ts",
+    "spike:claude": "tsx src/spike.ts claude --login-shell --ready-pattern '❯\\s' --prompt 'compute seven plus eight, reply with only the resulting number, no words' --expect 15 --timeout 90000",
+    "spike:claude:ask": "tsx src/ask-claude.ts --login-shell",
+    "spike:claude:interactive": "tsx src/spike.ts claude --login-shell --interactive",
+    "spike:kimi": "tsx src/spike.ts kimi --login-shell --ready-pattern '(?:Welcome|Send /help)' --prompt 'compute seven plus eight, reply with only the resulting number, no words' --expect 15 --timeout 90000",
+    "spike:kimi:interactive": "tsx src/spike.ts kimi --login-shell --interactive",
+    "spike:codex": "tsx src/spike.ts codex --login-shell --ready-pattern '›' --settled-stability 4000 --post-ready-stability 1500 --prompt-enter-delay 500 --prompt 'compute seven plus eight, reply with only the resulting number, no words' --expect 15 --timeout 180000",
+    "spike:codex:interactive": "tsx src/spike.ts codex --login-shell --interactive",
+    "spike:integration-test": "tsx src/integration-test-example.ts",
+    "spike:claude:live": "tsx src/ask-claude.ts --login-shell --open-terminal -v",
+    "spike:aikey-test": "tsx src/aikey-test-example.ts",
+    "spike:history": "tsx src/history-example.ts",
+    "spike:test-pty-query-response": "tsx src/test-pty-query-response.ts",
+    "spike:test-pty-cleanup": "tsx src/test-pty-cleanup.ts"
+  },
+  "dependencies": {
+    "@xterm/headless": "^5.5.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
