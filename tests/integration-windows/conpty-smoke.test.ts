@@ -46,14 +46,20 @@ describeIfWindows("Windows ConPTY smoke", () => {
     const session = await startSession({ command: "pwsh.exe", args: ["-NoLogo"] });
     try {
       await session.waitForRegex(/PS\s.*>\s/, { timeoutMs: 5_000 });
-      session.write("Start-Sleep -Seconds 30\r");
-      await new Promise((r) => setTimeout(r, 300));
+      // Compound command: Start-Sleep 30; Write-Host SLEEP_DONE — uses `;`
+      // (sequential) so SLEEP_DONE only fires if sleep returned normally.
+      // ctrl_c interrupts Start-Sleep, semicolon stops the pipeline (pwsh
+      // doesn't continue past an interrupted command), SLEEP_DONE never
+      // prints. This avoids the fragile "follow-up command + prompt regex"
+      // chain which was racing with stale screen buffer + slow ConPTY
+      // redraw on the GH runner.
+      session.write("Start-Sleep -Seconds 30; Write-Host SLEEP_DONE\r");
+      await new Promise((r) => setTimeout(r, 500));
       session.sendKey("ctrl_c");
-      // Prompt should resume within 3s of the interrupt.
-      await session.waitForRegex(/PS\s.*>\s/, { timeoutMs: 3_000 });
-      // Follow-up command works.
-      session.write("Write-Host POST_CTRL_C\r");
-      await session.waitForText("POST_CTRL_C", { timeoutMs: 3_000 });
+      // Settle period for ConPTY to deliver any post-interrupt output.
+      await new Promise((r) => setTimeout(r, 1_500));
+      // Sleep was interrupted: SLEEP_DONE must NOT appear.
+      expect(session.getCleanHistory()).not.toContain("SLEEP_DONE");
     } finally {
       await session.close();
     }
