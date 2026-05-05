@@ -53,13 +53,19 @@ describeIfWindows("Windows ConPTY smoke", () => {
       // prints. This avoids the fragile "follow-up command + prompt regex"
       // chain which was racing with stale screen buffer + slow ConPTY
       // redraw on the GH runner.
-      session.write("Start-Sleep -Seconds 30; Write-Host SLEEP_DONE\r");
+      session.write("Start-Sleep -Seconds 30; Write-Host SLEEP_DONE_OUTPUT\r");
       await new Promise((r) => setTimeout(r, 500));
       session.sendKey("ctrl_c");
       // Settle period for ConPTY to deliver any post-interrupt output.
       await new Promise((r) => setTimeout(r, 1_500));
-      // Sleep was interrupted: SLEEP_DONE must NOT appear.
-      expect(session.getCleanHistory()).not.toContain("SLEEP_DONE");
+
+      // The marker string SLEEP_DONE_OUTPUT WILL appear in history as the
+      // typed-command echo (PowerShell echoes input back). Distinguish
+      // command output (would be on its own line if Write-Host actually
+      // ran) from input echo (mixed with `> ` prompt / other characters).
+      const lines = session.getCleanHistory().replace(/\r\n/g, "\n").split("\n");
+      const standaloneOutput = lines.find((l) => /^\s*SLEEP_DONE_OUTPUT\s*$/.test(l));
+      expect(standaloneOutput).toBeUndefined();
     } finally {
       await session.close();
     }
