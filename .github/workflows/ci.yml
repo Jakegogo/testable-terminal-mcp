@@ -51,9 +51,12 @@ jobs:
         run: npm run test:unit
 
       - name: Bash integration tests
-        # bash exists on macOS/Linux runners; on windows-latest we use
-        # Git for Windows' bash (which ships pre-installed). The PTY layer
-        # is exercised differently here — on Windows it goes through ConPTY.
+        # macOS/Linux: native bash is on PATH. Windows: skipped here —
+        # spawning "bash" hits node-pty's "File not found" because Git for
+        # Windows' bash isn't on the runner's default PATH and the test
+        # spawns by short name. Windows PTY behavior is covered by the
+        # `windows-only` job below (pwsh + ConPTY).
+        if: runner.os != 'Windows'
         run: npm run test:integration-bash
 
       - name: Upload artifacts on failure

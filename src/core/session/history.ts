@@ -47,7 +47,27 @@ export class SessionHistory {
     }
   }
 
-  /** Append a chunk of raw bytes. Called by the session on every onData. */
+  /**
+   * Append a chunk of raw bytes. Called by the session on every onData.
+   *
+   * Sliding-window semantics: after append, the ring contains exactly the
+   * last `maxBytes` bytes of the cumulative stream — at byte granularity,
+   * not chunk granularity. This handles three cases correctly:
+   *
+   *   1. Normal small chunks → standard FIFO eviction
+   *   2. One oversized chunk (>maxBytes) → slice its tail
+   *   3. Small chunks AFTER an oversized one — the oversized chunk's tail
+   *      gets head-sliced, not whole-shifted, so subsequent prompt redraws
+   *      don't evict the saved tail
+   *
+   * Repro for case 3: Ubuntu/macOS node 20 + bash batches `for i in $(seq
+   * 1 80); do echo LINE_$i; done` into one ~720B chunk. The trailing
+   * `bash-3.2$ ` prompt redraw arrives as a separate ~10B chunk. The old
+   * implementation FIFO-shifted the entire 720B chunk to fit the 10B,
+   * leaving history with just the prompt. The byte-level slice fixes
+   * this — every appended byte stays in the ring until pushed out by
+   * fresher bytes.
+   */
   append(data: string): void {
     this.chunkCount += 1;
     if (this.diskStream) this.diskStream.write(data);
@@ -55,21 +75,22 @@ export class SessionHistory {
     const buf = Buffer.from(data, "utf8");
     this.chunks.push(buf);
     this.bytes += buf.length;
-    while (this.bytes > this.maxBytes && this.chunks.length > 0) {
-      const dropped = this.chunks.shift()!;
-      this.bytes -= dropped.length;
-      this.truncated = true;
-    }
-    // Edge case: a single chunk arrived larger than maxBytes — the shift
-    // loop above just dropped it entirely, leaving history empty.
-    // Observed on Ubuntu node 20 + bash where a tight loop's stdout was
-    // batched into one >512B chunk by the PTY layer. Keep the trailing
-    // maxBytes bytes so callers always see the MOST RECENT output, which
-    // is what they actually care about.
-    if (this.chunks.length === 0 && buf.length > this.maxBytes) {
-      const tail = buf.subarray(buf.length - this.maxBytes);
-      this.chunks.push(tail);
-      this.bytes = tail.length;
+
+    // Trim front to fit. Each iteration either drops the whole front
+    // chunk (if its length ≤ overflow) or slices the front chunk's head
+    // (if its length > overflow), keeping the chunk's tail.
+    while (this.bytes > this.maxBytes) {
+      const overflow = this.bytes - this.maxBytes;
+      const front = this.chunks[0]!;
+      if (front.length <= overflow) {
+        this.chunks.shift();
+        this.bytes -= front.length;
+      } else {
+        // Slice off the head of `front`. Buffer.subarray shares the
+        // underlying ArrayBuffer (zero-copy); cheap on hot paths.
+        this.chunks[0] = front.subarray(overflow);
+        this.bytes -= overflow;
+      }
       this.truncated = true;
     }
   }
